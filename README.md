@@ -1,1 +1,1 @@
-# delphicore
+# delphico
