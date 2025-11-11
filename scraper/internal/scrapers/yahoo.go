@@ -25,7 +25,7 @@ func NewReutersScraper() *YahooScraper {
 func (s *YahooScraper) ScrapeWebsite() {
 	c := colly.NewCollector(
 		colly.Async(true),
-		colly.MaxDepth(3), // leave to 0 default in production to keep scraping the site
+		colly.MaxDepth(0), // leave to 0 default in production to keep scraping the site
 		colly.URLFilters(regexp.MustCompile("^"+regexp.QuoteMeta(rootWebsite))),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	)
@@ -61,9 +61,10 @@ func (s *YahooScraper) ScrapeWebsite() {
 		requestId := utils.GetRequestIdFromElement(e)
 		logger.LogRequest(requestId, fmt.Sprintf("found content at %s", e.Request.URL))
 
-		paragraphText := e.ChildText("p")
+		article := e.ChildText("p")
+		article = utils.AddSpacesAfterDots(article)
 		fmt.Printf("URL: %s\n", e.Request.URL.String())
-		fmt.Printf("Extracted Paragraph: %s\n", paragraphText)
+		fmt.Printf("Extracted Paragraph: %s\n", article)
 		fmt.Println("---")
 	})
 
@@ -72,9 +73,10 @@ func (s *YahooScraper) ScrapeWebsite() {
 		requestId := utils.GetRequestIdFromElement(e)
 		logger.LogRequest(requestId, fmt.Sprintf("found read more content at %s", e.Request.URL))
 
-		paragraphText := e.ChildText("p")
+		readMore := e.ChildText("p")
+		readMore = utils.AddSpacesAfterDots(readMore)
 		fmt.Printf("URL: %s\n", e.Request.URL.String())
-		fmt.Printf("Extracted Read More Paragraph: %s\n", paragraphText)
+		fmt.Printf("Extracted Read More Paragraph: %s\n", readMore)
 		fmt.Println("---")
 	})
 
