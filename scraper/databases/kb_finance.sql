@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS kb_finance.articles (
 );
 
 CREATE TABLE IF NOT EXISTS kb_finance.articles_metadata (
-    id UUID PRIMARY KEY                                  
+    id UUID PRIMARY KEY,                                
     published_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
     author VARCHAR(255) NOT NULL,
