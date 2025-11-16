@@ -50,7 +50,7 @@ sudo apt-get install ./docker-desktop-amd64.deb
 
 ```
 sudo apt update
-sudo apt install confluent -cli -y
+sudo apt install confluent-cli -y
 ```
 
 #### 3. Start the service and register topics
