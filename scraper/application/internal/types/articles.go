@@ -15,14 +15,14 @@ func (d ArticleDomain) ToString() string {
 }
 
 type ArticleMetadata struct {
-	Url       string
-	Author    string
-	Published string
-	Domain    ArticleDomain
+	Url       string        `json:"url"`
+	Author    string        `json:"author"`
+	Published string        `json:"published"`
+	Domain    ArticleDomain `json:"domain"`
 }
 
 type Article struct {
-	Url     string
-	Content string
-	Domain  ArticleDomain
+	Url     string        `json:"url"`
+	Content string        `json:"content"`
+	Domain  ArticleDomain `json:"domain"`
 }
