@@ -25,7 +25,7 @@ type ScrapingEngine struct {
 }
 
 // run from plaintext port on kafka broker
-const brokerAddress = "localhost:37987"
+const brokerAddress = "localhost:36957"
 
 func InitialiseEngine() *ScrapingEngine {
 	scrapers := initialiseScrapers()
