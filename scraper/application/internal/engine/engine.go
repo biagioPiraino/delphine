@@ -25,7 +25,7 @@ type ScrapingEngine struct {
 }
 
 // run from plaintext port on kafka broker
-const brokerAddress = "localhost:36957"
+var brokerAddress = "host.docker.internal:" + os.Getenv("KAFKA_PORT")
 
 func InitialiseEngine() *ScrapingEngine {
 	scrapers := initialiseScrapers()

@@ -58,6 +58,11 @@ sudo apt install confluent-cli -y
 ```
 # launch local broker and list it
 sudo confluent local kafka start
+
+# launch to specific port to avoid random port allocation (useful with fixed port for containers)
+sudo confluent local kafka start --plaintext-ports 9094 --brokers 1
+
+# listing brokers
 sudo confluent local kafka broker list
 
 # create a topic and list it
