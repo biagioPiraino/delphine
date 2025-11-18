@@ -11,6 +11,8 @@ import (
 
 	"github.com/IBM/sarama"
 	"github.com/biagioPiraino/delphico/consumer/internal/consumers"
+	"github.com/biagioPiraino/delphico/consumer/internal/databases"
+	"github.com/biagioPiraino/delphico/consumer/internal/utils"
 )
 
 var (
@@ -19,7 +21,11 @@ var (
 )
 
 func init() {
-	brokers = []string{"localhost:36957"}
+	// load env variables
+	utils.LoadEnvVariables()
+
+	// setup borker and consumers
+	brokers = []string{"localhost:9094"}
 	config := sarama.NewConfig()
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
 	config.Consumer.Group.Rebalance.Strategy = sarama.NewBalanceStrategyRange()
@@ -38,7 +44,7 @@ func runFinanceConsumerGroup(wg *sync.WaitGroup, ctx context.Context) {
 	defer client.Close()
 
 	for {
-		err := client.Consume(ctx, []string{consumer.Topic}, consumer)
+		err := client.Consume(ctx, consumer.Topics, consumer)
 
 		if ctx.Err() != nil {
 			// just return, delegate closing to cleanup function in consumer logic
@@ -54,6 +60,10 @@ func runFinanceConsumerGroup(wg *sync.WaitGroup, ctx context.Context) {
 }
 
 func main() {
+	// initialise database
+	db := databases.InitDelphineDatabase()
+	defer db.Pool.Close()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

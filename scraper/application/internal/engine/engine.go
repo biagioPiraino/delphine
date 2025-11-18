@@ -25,7 +25,8 @@ type ScrapingEngine struct {
 }
 
 // run from plaintext port on kafka broker
-var brokerAddress = "host.docker.internal:" + os.Getenv("KAFKA_PORT")
+// var brokerAddress = "host.docker.internal:" + os.Getenv("KAFKA_PORT")
+const brokerAddress = "localhost:9094"
 
 func InitialiseEngine() *ScrapingEngine {
 	scrapers := initialiseScrapers()
@@ -123,7 +124,7 @@ func (e ScrapingEngine) Run() {
 				continue
 			}
 			msg := &sarama.ProducerMessage{
-				Topic: metadata.Domain.ToString(),
+				Topic: metadata.Domain.ToString() + "-metadata",
 				Key:   sarama.StringEncoder(metadata.Domain.ToString()),
 				Value: sarama.ByteEncoder(json_metadata),
 			}

@@ -6,7 +6,7 @@ CREATE ROLE delphine_scrapers LOGIN PASSWORD 'securepassword'
 CONNECTION
 LIMIT 99;
 
-GRANT CONNECT ON DATABASE Delphine TO delphine_scrapers;
+GRANT CONNECT ON DATABASE delphine TO delphine_scrapers;
 
 CREATE SCHEMA IF NOT EXISTS kb_finance;
 

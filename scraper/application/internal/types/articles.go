@@ -18,6 +18,7 @@ type ArticleMetadata struct {
 	Url       string        `json:"url"`
 	Author    string        `json:"author"`
 	Published string        `json:"published"`
+	Provider  string        `json:"provider"`
 	Domain    ArticleDomain `json:"domain"`
 }
 

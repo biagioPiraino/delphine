@@ -17,6 +17,7 @@ const newsBaseUrl = "https://uk.finance.yahoo.com/news"
 const metadataSelector = ".mainContainer .byline .byline-attr"
 const contentSelector = ".mainContainer .body-wrap .body .bodyItems-wrapper"
 const readmoreSelector = ".mainContainer .body-wrap .body .read-more-wrapper"
+const provider = "Yahoo Finance"
 
 type YahooScraper struct{}
 
@@ -58,6 +59,7 @@ func (s *YahooScraper) ScrapeWebsite(artChan chan types.Article, mdChan chan typ
 			Author:    author,
 			Published: datePublished,
 			Domain:    types.FinanceDomain,
+			Provider:  provider,
 		}
 	})
 

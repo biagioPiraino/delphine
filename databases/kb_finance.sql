@@ -2,7 +2,7 @@
 
 --- TABLES ---
 CREATE TABLE IF NOT EXISTS kb_finance.providers (                                     
-    id UUID PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
     name VARCHAR(255) UNIQUE NOT NULL
 );
@@ -20,8 +20,8 @@ CREATE TABLE IF NOT EXISTS kb_finance.articles_metadata (
     published_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
     author VARCHAR(255) NOT NULL,
-    article_url TEXT NOT NULL REFERENCES kb_finance.articles (url),
-    provider_id UUID NOT NULL REFERENCES kb_finance.providers (id)
+    url TEXT UNIQUE NOT NULL,
+    provider_id UUID NOT NULL REFERENCES kb_finance.providers (id) 
 );
 
 --- FUNCTIONS AND PROCEDURES ---
@@ -32,7 +32,9 @@ DECLARE
 BEGIN
     INSERT INTO kb_finance.providers(name)
     VALUES (name_p)
-    ON CONFLICT (name) DO NOTHING
+    -- Set on conlict required to trigger the returning clause
+    ON CONFLICT (name) DO UPDATE
+    SET name = EXCLUDED.name
     RETURNING id INTO new_id;
 
     RETURN new_id;
@@ -54,14 +56,14 @@ DECLARE provider_id_p UUID;
 BEGIN
     provider_id_p := kb_finance.add_provider(metadata_p.provider);
 
-    INSERT INTO kb_finance.articles_metadata(id, published_at, author, article_url, provider_id)
+    INSERT INTO kb_finance.articles_metadata(id, published_at, author, url, provider_id)
     VALUES (
         metadata_p.id,
         metadata_p.published_at,
         metadata_p.author,
         metadata_p.article_url,
         provider_id_p
-    );
+    ) ON CONFLICT (url) DO NOTHING;
 END;
 $$;
 
