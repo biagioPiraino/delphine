@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -102,15 +103,24 @@ func (e ScrapingEngine) Run() {
 				e.articleChannel = nil
 				continue
 			}
-			json_article, err := json.Marshal(article)
-			if err != nil {
+
+			buf := types.JsonBufferPool.Get().(*bytes.Buffer)
+			buf.Reset()
+
+			if err := json.NewEncoder(buf).Encode(article); err != nil {
+				types.JsonBufferPool.Put(buf)
 				logger.LogRequest(strconv.Itoa(os.Getpid()), "error while marshalling the article before sending to the queue")
 				continue
 			}
+
+			payload := make([]byte, buf.Len())
+			copy(payload, buf.Bytes()) // copied to avoid concurrency issues related to async producer
+			types.JsonBufferPool.Put(buf)
+
 			msg := &sarama.ProducerMessage{
 				Topic: article.Domain.ToString(),
 				Key:   sarama.StringEncoder(article.Domain.ToString()),
-				Value: sarama.ByteEncoder(json_article),
+				Value: sarama.ByteEncoder(payload),
 			}
 			e.producer.Input() <- msg
 		case metadata, ok := <-e.metadataChannel:
@@ -118,15 +128,24 @@ func (e ScrapingEngine) Run() {
 				e.metadataChannel = nil
 				continue
 			}
-			json_metadata, err := json.Marshal(metadata)
-			if err != nil {
+
+			buf := types.JsonBufferPool.Get().(*bytes.Buffer)
+			buf.Reset()
+
+			if err := json.NewEncoder(buf).Encode(metadata); err != nil {
+				types.JsonBufferPool.Put(buf)
 				logger.LogRequest(strconv.Itoa(os.Getpid()), "error while marshalling the metadata before sending to the queue")
 				continue
 			}
+
+			payload := make([]byte, buf.Len())
+			copy(payload, buf.Bytes()) // copied to avoid concurrency issues related to async producer
+			types.JsonBufferPool.Put(buf)
+
 			msg := &sarama.ProducerMessage{
 				Topic: metadata.Domain.ToString() + "-metadata",
 				Key:   sarama.StringEncoder(metadata.Domain.ToString()),
-				Value: sarama.ByteEncoder(json_metadata),
+				Value: sarama.ByteEncoder(payload),
 			}
 			e.producer.Input() <- msg
 		}
