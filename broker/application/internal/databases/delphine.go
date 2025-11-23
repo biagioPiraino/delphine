@@ -2,63 +2,48 @@ package databases
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/lib/pq"
 )
 
-var (
-	Database *DelphineDatabase
-	once     sync.Once
-)
-
-type DelphineDatabase struct {
-	Pool *pgxpool.Pool
+type DelphineDb struct {
+	Pool *sql.DB
 }
 
-func InitDelphineDatabase() *DelphineDatabase {
-	once.Do(func() {
-		log.Print("initialise database")
-		poolConfig, err := pgxpool.ParseConfig(os.Getenv("DB_CONNECTION"))
-		if err != nil {
-			log.Fatalf("%s,Unable to parse connection config: %v", Now(), err)
-		}
+func InitialisePool() (*DelphineDb, error) {
+	db, err := sql.Open("postgres", os.Getenv("DB_CONNECTION"))
+	if err != nil {
+		return nil, err
+	}
 
-		poolConfig.MaxConns = MustParseInt32(os.Getenv("DB_MAX_CONN"))                       // Maximum number of connections in the pool
-		poolConfig.MinConns = MustParseInt32(os.Getenv("DB_MIN_CONN"))                       // Minimum number of connections to maintain
-		poolConfig.MaxConnLifetime = MustParseDurationMinutes(os.Getenv("DB_MAX_CONN_TIME")) // Maximum lifetime of a connection
-		poolConfig.MaxConnIdleTime = MustParseDurationMinutes(os.Getenv("DB_MIN_CONN_TIME")) // Maximum idle time for connections
+	db.SetMaxOpenConns(MustParseInt(os.Getenv("DB_MAX_CONN")))
+	db.SetMaxIdleConns(MustParseInt(os.Getenv("DB_MAX_CONN")))
+	db.SetConnMaxLifetime(MustParseDurationMinutes(os.Getenv("DB_MAX_CONN_TIME")))
+	db.SetConnMaxIdleTime(MustParseDurationMinutes(os.Getenv("DB_MIN_CONN_TIME")))
 
-		pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
-		if err != nil {
-			log.Fatalf("%s,Unable to create connection pool: %v", Now(), err)
-		}
-		Database = &DelphineDatabase{
-			Pool: pool,
-		}
-	})
+	// set context background to ping db and asses is all good
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	return Database
+	if err := db.PingContext(ctx); err != nil {
+		return nil, err
+	}
+
+	log.Println("successfully initialised database")
+	return &DelphineDb{Pool: db}, nil
 }
 
-func GetDatabase() *DelphineDatabase {
-	return Database
-}
-
-func Now() string {
-	return time.Now().UTC().Format(time.RFC3339)
-}
-
-func MustParseInt32(value string) int32 {
+func MustParseInt(value string) int {
 	casted, err := strconv.ParseInt(value, 10, 32)
 	if err != nil {
 		panic(err)
 	}
-	return int32(casted)
+	return int(casted)
 }
 
 func MustParseDurationMinutes(value string) time.Duration {

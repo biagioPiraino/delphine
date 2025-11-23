@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -28,20 +29,23 @@ func init() {
 	brokers = []string{"localhost:9094"}
 	config := sarama.NewConfig()
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
-	config.Consumer.Group.Rebalance.Strategy = sarama.NewBalanceStrategyRange()
 	config.Consumer.Offsets.AutoCommit.Enable = true
 	config.Consumer.Offsets.AutoCommit.Interval = 1 * time.Second
 }
 
-func runFinanceConsumerGroup(wg *sync.WaitGroup, ctx context.Context) {
+func runFinanceConsumerGroup(db *databases.DelphineDb, wg *sync.WaitGroup, ctx context.Context) {
 	defer wg.Done()
 
-	consumer := consumers.NewFinanceConsumer()
+	consumer := consumers.NewFinanceConsumer(db)
 	client, err := sarama.NewConsumerGroup(brokers, consumer.GroupId, config)
 	if err != nil {
 		log.Fatalf("Error while initialising finance consumer: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			log.Println(fmt.Sprintf("error closing sarama consumer: %v", err))
+		}
+	}()
 
 	for {
 		err := client.Consume(ctx, consumer.Topics, consumer)
@@ -61,20 +65,31 @@ func runFinanceConsumerGroup(wg *sync.WaitGroup, ctx context.Context) {
 
 func main() {
 	// initialise database
-	db := databases.InitDelphineDatabase()
-	defer db.Pool.Close()
+	db, err := databases.InitialisePool()
+	if err != nil {
+		panic(err)
+	}
+
+	// closing database on defer
+	defer func() {
+		if err := db.Pool.Close(); err != nil {
+			log.Println(fmt.Sprintf("error closing database, %v", err))
+		} else {
+			log.Println("Database closed successfully")
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go runFinanceConsumerGroup(&wg, ctx)
+	go runFinanceConsumerGroup(db, &wg, ctx)
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
-	<-signals
+	<-signals // graceful closure in case app terminated
 	log.Println("Received termination signals...closing")
 	cancel()
 

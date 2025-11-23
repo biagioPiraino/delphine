@@ -6,44 +6,47 @@ import (
 	"log"
 
 	"github.com/IBM/sarama"
+	"github.com/biagioPiraino/delphico/consumer/internal/databases"
 	"github.com/biagioPiraino/delphico/consumer/internal/repositories"
 )
 
 type FinanceConsumer struct {
-	Topics  []string
-	GroupId string
+	Topics     []string
+	GroupId    string
+	Repository *repositories.FinanceRepository
 }
 
-func NewFinanceConsumer() *FinanceConsumer {
+func NewFinanceConsumer(db *databases.DelphineDb) *FinanceConsumer {
 	return &FinanceConsumer{
-		Topics:  []string{"finance", "finance-metadata"},
-		GroupId: "finance-workers",
+		Topics:     []string{"finance", "finance-metadata"},
+		GroupId:    "finance-workers",
+		Repository: repositories.NewFinanceRepository(db),
 	}
 }
 
-func (h *FinanceConsumer) Setup(sarama.ConsumerGroupSession) error {
+func (h FinanceConsumer) Setup(sarama.ConsumerGroupSession) error {
 	log.Println("Finance consumer setup completed. Start listening for messages...")
 	return nil
 }
 
-func (h *FinanceConsumer) Cleanup(sarama.ConsumerGroupSession) error {
+func (h FinanceConsumer) Cleanup(sarama.ConsumerGroupSession) error {
 	log.Println("Finance consumer cleanup completed.")
 	return nil
 }
 
-func (h *FinanceConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+func (h FinanceConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for msg := range claim.Messages() {
 		switch msg.Topic {
 		case "finance":
 			var article repositories.FinanceArticle
 			json.NewDecoder(bytes.NewReader(msg.Value)).Decode(&article)
-			if err := repositories.AddFinanceArticle(article); err != nil {
+			if err := h.Repository.AddFinanceArticle(article); err != nil {
 				log.Printf("%v", err)
 			}
 		case "finance-metadata":
 			var metadata repositories.FinanceArticleMetadata
 			json.NewDecoder(bytes.NewReader(msg.Value)).Decode(&metadata)
-			if err := repositories.AddFinanceMetadata(metadata); err != nil {
+			if err := h.Repository.AddFinanceMetadata(metadata); err != nil {
 				log.Printf("%v", err)
 			}
 		}
