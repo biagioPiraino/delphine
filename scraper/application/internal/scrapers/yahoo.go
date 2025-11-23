@@ -1,7 +1,10 @@
 package scrapers
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"net/http"
 	"regexp"
 	"time"
 
@@ -21,11 +24,21 @@ const provider = "Yahoo Finance"
 
 type YahooScraper struct{}
 
+type contextTransport struct {
+	ctx   context.Context
+	trans *http.Transport
+}
+
+func (t *contextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.WithContext(t.ctx)
+	return t.trans.RoundTrip(req)
+}
+
 func NewReutersScraper() *YahooScraper {
 	return &YahooScraper{}
 }
 
-func (s *YahooScraper) ScrapeWebsite(artChan chan types.Article, mdChan chan types.ArticleMetadata) {
+func (s *YahooScraper) ScrapeWebsite(ctx context.Context, artChan chan types.Article, mdChan chan types.ArticleMetadata) {
 	c := colly.NewCollector(
 		colly.Async(true),
 		colly.MaxDepth(3), // leave to 0 default in production to keep scraping the site
@@ -40,6 +53,22 @@ func (s *YahooScraper) ScrapeWebsite(artChan chan types.Article, mdChan chan typ
 		Delay:       2 * time.Second,
 		RandomDelay: 4 * time.Second,
 	})
+
+	c.OnRequest(func(request *colly.Request) {
+		select {
+		case <-ctx.Done():
+			log.Println("ctx done, aborting request...")
+			request.Abort()
+		default:
+
+		}
+	})
+
+	trans := &contextTransport{
+		ctx:   ctx,
+		trans: &http.Transport{},
+	}
+	c.WithTransport(trans)
 
 	// routing and visiting callback
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {

@@ -2,11 +2,15 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -68,11 +72,14 @@ func (e ScrapingEngine) Run() {
 	wg := &sync.WaitGroup{}
 	wg.Add(e.scrapersCount)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	for i := 0; i < e.scrapersCount; i++ {
 		scraper := e.scrapers[i]
 		go func() {
 			defer wg.Done()
-			scraper.ScrapeWebsite(e.articleChannel, e.metadataChannel)
+			scraper.ScrapeWebsite(ctx, e.articleChannel, e.metadataChannel)
 		}()
 	}
 
@@ -150,4 +157,14 @@ func (e ScrapingEngine) Run() {
 			e.producer.Input() <- msg
 		}
 	}
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+
+	<-signals // graceful closure in case app terminated
+	log.Println("Received termination signals...closing")
+	cancel()
+
+	wg.Wait()
+	log.Println("All consumer are shut down")
 }
