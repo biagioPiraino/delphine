@@ -55,13 +55,9 @@ func (a *App) Run() {
 
 	// launch sentinel goroutine that listen for syscall term and interrupt
 	go func() {
-		select {
-		case <-sigChan:
-			fmt.Println("captured termination signal...exiting")
-			cancel() // propagate cancellation to all the children process coordinating closure of scrapers and producer
-		case <-ctx.Done():
-			// context cancelled by happy path, do not anything
-		}
+		<-sigChan
+		fmt.Println("captured termination signal...exiting")
+		cancel() // propagate cancellation to all the children process coordinating closure of scrapers and producer
 	}()
 
 	// channel for async production of messages to kafka
@@ -105,10 +101,9 @@ loop:
 			}
 			select {
 			case a.producer.Input() <- msg:
-			// sent
+			// message sent, blocking
 			case <-ctx.Done():
-				break loop
-
+				break loop // break loop so to trigger happy path cancellation or exiting on sig int / term
 			}
 		}
 	}
