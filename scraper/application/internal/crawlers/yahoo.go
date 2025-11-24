@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/biagioPiraino/delphico/scraper/internal/logger"
@@ -14,48 +15,39 @@ import (
 	"github.com/google/uuid"
 )
 
-const rootBaseUrl = "https://uk.finance.yahoo.com/"
-const newsBaseUrl = "https://uk.finance.yahoo.com/news"
-const metadataSelector = ".mainContainer .byline .byline-attr"
-const contentSelector = ".mainContainer .body-wrap .body .bodyItems-wrapper"
-const readmoreSelector = ".mainContainer .body-wrap .body .read-more-wrapper"
-const provider = "Yahoo Finance"
-
-type YahooCrawler struct{}
-
-type contextTransport struct {
-	ctx   context.Context
-	trans *http.Transport
+type YahooCrawler struct {
+	config CrawlerConfig
 }
 
-func (t *contextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.WithContext(t.ctx)
-	return t.trans.RoundTrip(req)
+func NewYahooCrawler(config CrawlerConfig) *YahooCrawler {
+	return &YahooCrawler{
+		config: config,
+	}
 }
 
-func NewYahooCrawler() *YahooCrawler {
-	return &YahooCrawler{}
-}
-
-func (s *YahooCrawler) ScrapeWebsite(
+func (yc *YahooCrawler) ScrapeWebsite(
 	wg *sync.WaitGroup,
 	ctx context.Context,
-	artChan chan types.Article,
-	mdChan chan types.ArticleMetadata) {
+	artChan chan types.Article) {
 	defer wg.Done()
 
 	c := colly.NewCollector(
 		colly.Async(true),
-		colly.MaxDepth(3), // leave to 0 default in production to keep scraping the site
-		colly.URLFilters(regexp.MustCompile("^"+regexp.QuoteMeta(rootBaseUrl)), regexp.MustCompile("^"+regexp.QuoteMeta(newsBaseUrl))),
+		colly.MaxDepth(yc.config.MaxDepth), // leave to 0 default in production to keep scraping the site
+		colly.URLFilters(regexp.MustCompile("^"+regexp.QuoteMeta(yc.config.Root))),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	)
 
 	c.AllowURLRevisit = false
-	c.Limit(&colly.LimitRule{
-		DomainGlob:  "*uk.finance.yahoo*",
+	err := c.Limit(&colly.LimitRule{
+		DomainGlob: yc.config.DomainGlobal,
+		//DomainGlob:  "*uk.finance.yahoo*",
 		Parallelism: 1,
 	})
+	if err != nil {
+		fmt.Println("Unable to setup crawler limits. returning.")
+		return
+	}
 
 	c.OnRequest(func(request *colly.Request) {
 		select {
@@ -64,6 +56,9 @@ func (s *YahooCrawler) ScrapeWebsite(
 			request.Abort()
 		default:
 			// keep scraping in default case
+			requestId := uuid.New().String()
+			request.Headers.Add(utils.RequestIdHeader, requestId)
+			logger.LogRequest(requestId, fmt.Sprintf("visiting %s", request.URL))
 		}
 	})
 
@@ -76,57 +71,46 @@ func (s *YahooCrawler) ScrapeWebsite(
 	// routing and visiting callback
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
-		e.Request.Visit(link)
-	})
-
-	// extract metadata callback
-	c.OnHTML(metadataSelector, func(e *colly.HTMLElement) {
-		requestId := utils.GetRequestIdFromElement(e)
-		logger.LogRequest(requestId, fmt.Sprintf("found metadata at %s", e.Request.URL))
-
-		author := e.ChildText(".byline-attr-author a")
-		datePublished := e.ChildText(".byline-attr-time-style .byline-attr-meta-time")
-		mdChan <- types.ArticleMetadata{
-			Url:       e.Request.URL.String(),
-			Author:    author,
-			Published: datePublished,
-			Domain:    types.FinanceDomain,
-			Provider:  provider,
+		err := e.Request.Visit(link)
+		if err != nil {
+			return
 		}
 	})
 
-	// extract main content
-	c.OnHTML(contentSelector, func(e *colly.HTMLElement) {
+	// extract content from article tag
+	c.OnHTML("article", func(e *colly.HTMLElement) {
+		article := e.ChildText(".article-wrap p")
+		if article == "" {
+			return
+		}
+
 		requestId := utils.GetRequestIdFromElement(e)
 		logger.LogRequest(requestId, fmt.Sprintf("found content at %s", e.Request.URL))
 
-		article := e.ChildText("p")
-		article = utils.AddSpacesAfterDots(article)
-		artChan <- types.Article{
-			Url:     e.Request.URL.String(),
-			Content: article,
-			Domain:  types.FinanceDomain,
+		author := strings.Trim(strings.Split(e.ChildText(".byline-attr-author"), "·")[0], " ")
+		if author == "" {
+			author = "unknown"
 		}
-	})
 
-	// extract read more content
-	c.OnHTML(readmoreSelector, func(e *colly.HTMLElement) {
-		requestId := utils.GetRequestIdFromElement(e)
-		logger.LogRequest(requestId, fmt.Sprintf("found read more content at %s", e.Request.URL))
-
-		readMore := e.ChildText("p")
-		readMore = utils.AddSpacesAfterDots(readMore)
-		artChan <- types.Article{
-			Url:     e.Request.URL.String(),
-			Content: readMore,
-			Domain:  types.FinanceDomain,
+		title := e.ChildText(".cover-title")
+		if title == "" {
+			title = "unknown"
 		}
-	})
 
-	c.OnRequest(func(r *colly.Request) {
-		requestId := uuid.New().String()
-		r.Headers.Add(utils.RequestIdHeader, requestId)
-		logger.LogRequest(requestId, fmt.Sprintf("visiting %s", r.URL))
+		published := e.ChildText(".byline-attr-meta-time")
+		if published == "" {
+			published = "unknown"
+		}
+
+		art := types.Article{
+			Url:      e.Request.URL.String(),
+			Author:   author,
+			Title:    title,
+			Provider: "Yahoo Finance",
+			Domain:   types.FinanceDomain,
+			Content:  article,
+		}
+		artChan <- art
 	})
 
 	c.OnResponse(func(r *colly.Response) {
@@ -139,6 +123,10 @@ func (s *YahooCrawler) ScrapeWebsite(
 		logger.LogRequest(requestId, fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e))
 	})
 
-	c.Visit(rootBaseUrl)
+	err = c.Visit(yc.config.Root)
+	if err != nil {
+		fmt.Printf("error visiting %s. returning...\n", yc.config.Root)
+		return
+	}
 	c.Wait()
 }

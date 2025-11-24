@@ -23,14 +23,10 @@ type Config struct {
 }
 
 type App struct {
-	crawlers []interfaces.ICrawler
-
-	articleChannel  chan types.Article
-	metadataChannel chan types.ArticleMetadata
-
-	producer sarama.AsyncProducer
-
-	config Config
+	config           Config
+	crawlers         []interfaces.ICrawler
+	ingestionChannel chan types.Article
+	producer         sarama.AsyncProducer
 }
 
 func NewApp(config Config) *App {
@@ -42,11 +38,10 @@ func NewApp(config Config) *App {
 	engines := newCrawlers()
 
 	return &App{
-		crawlers:        engines,
-		producer:        producer,
-		config:          config,
-		articleChannel:  make(chan types.Article),
-		metadataChannel: make(chan types.ArticleMetadata),
+		crawlers:         engines,
+		producer:         producer,
+		config:           config,
+		ingestionChannel: make(chan types.Article),
 	}
 }
 
@@ -69,8 +64,7 @@ func (a *App) Run() {
 	// and close channels
 	go func() {
 		wg.Wait()
-		close(a.articleChannel)
-		close(a.metadataChannel)
+		close(a.ingestionChannel)
 	}()
 
 	// channel for async production of messages to kafka
@@ -82,16 +76,16 @@ func (a *App) Run() {
 		scraper := a.crawlers[i]
 		wg.Add(1)
 		go func() {
-			scraper.ScrapeWebsite(&wg, ctx, a.articleChannel, a.metadataChannel)
+			scraper.ScrapeWebsite(&wg, ctx, a.ingestionChannel)
 		}()
 	}
 
 	// setup article and metadata channels receivers
-	for a.articleChannel != nil || a.metadataChannel != nil {
+	for a.ingestionChannel != nil {
 		select {
-		case article, ok := <-a.articleChannel:
+		case article, ok := <-a.ingestionChannel:
 			if !ok {
-				a.articleChannel = nil
+				a.ingestionChannel = nil
 				continue
 			}
 
@@ -104,24 +98,6 @@ func (a *App) Run() {
 			msg := &sarama.ProducerMessage{
 				Topic: article.Domain.ToString(),
 				Key:   sarama.StringEncoder(article.Domain.ToString()),
-				Value: sarama.ByteEncoder(payload),
-			}
-			a.producer.Input() <- msg
-		case metadata, ok := <-a.metadataChannel:
-			if !ok {
-				a.metadataChannel = nil
-				continue
-			}
-
-			payload, err := getArticleMetadataPayload(metadata)
-			if err != nil {
-				fmt.Println("unable to create payload... continuing")
-				continue
-			}
-
-			msg := &sarama.ProducerMessage{
-				Topic: metadata.Domain.ToString() + "-metadata",
-				Key:   sarama.StringEncoder(metadata.Domain.ToString()),
 				Value: sarama.ByteEncoder(payload),
 			}
 			a.producer.Input() <- msg
@@ -138,21 +114,6 @@ func getArticlePayload(article types.Article) ([]byte, error) {
 	buf.Reset()
 
 	if err := json.NewEncoder(buf).Encode(article); err != nil {
-		types.JsonBufferPool.Put(buf)
-		return nil, err
-	}
-
-	payload := make([]byte, buf.Len())
-	copy(payload, buf.Bytes()) // copied to avoid concurrency issues related to async producer
-	types.JsonBufferPool.Put(buf)
-	return payload, nil
-}
-
-func getArticleMetadataPayload(metadata types.ArticleMetadata) ([]byte, error) {
-	buf := types.JsonBufferPool.Get().(*bytes.Buffer)
-	buf.Reset()
-
-	if err := json.NewEncoder(buf).Encode(metadata); err != nil {
 		types.JsonBufferPool.Put(buf)
 		return nil, err
 	}
@@ -184,7 +145,10 @@ func (a *App) setupProducerResultsChannel(wg *sync.WaitGroup, ctx context.Contex
 
 func newCrawlers() []interfaces.ICrawler {
 	return []interfaces.ICrawler{
-		crawlers.NewYahooCrawler(),
+		crawlers.NewYahooCrawler(crawlers.CrawlerConfig{
+			Root:         "https://uk.finance.yahoo.com/news",
+			MaxDepth:     10,
+			DomainGlobal: "*uk.finance.yahoo*"}),
 	}
 }
 

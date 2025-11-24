@@ -14,16 +14,12 @@ func (d ArticleDomain) ToString() string {
 	return domains[d]
 }
 
-type ArticleMetadata struct {
+type Article struct {
 	Url       string        `json:"url"`
+	Title     string        `json:"title"`
 	Author    string        `json:"author"`
 	Published string        `json:"published"`
 	Provider  string        `json:"provider"`
+	Content   string        `json:"content"`
 	Domain    ArticleDomain `json:"domain"`
-}
-
-type Article struct {
-	Url     string        `json:"url"`
-	Content string        `json:"content"`
-	Domain  ArticleDomain `json:"domain"`
 }

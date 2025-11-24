@@ -12,5 +12,5 @@ type ICrawler interface {
 		wg *sync.WaitGroup,
 		ctx context.Context,
 		artChan chan types.Article,
-		mdChan chan types.ArticleMetadata)
+	)
 }
