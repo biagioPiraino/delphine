@@ -25,7 +25,7 @@ func init() {
 	// load env variables
 	utils.LoadEnvVariables()
 
-	// setup borker and consumers
+	// setup broker and consumers
 	brokers = []string{"localhost:9094"}
 	config := sarama.NewConfig()
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest

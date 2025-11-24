@@ -10,16 +10,16 @@ var domains = map[ArticleDomain]string{
 	FinanceDomain: "finance",
 }
 
-func (d ArticleDomain) ToString() string {
+func (d ArticleDomain) String() string {
 	return domains[d]
 }
 
 type Article struct {
-	Url       string        `json:"url"`
-	Title     string        `json:"title"`
-	Author    string        `json:"author"`
-	Published string        `json:"published"`
-	Provider  string        `json:"provider"`
-	Content   string        `json:"content"`
-	Domain    ArticleDomain `json:"domain"`
+	Url       string `json:"url"`
+	Title     string `json:"title"`
+	Author    string `json:"author"`
+	Published string `json:"published"`
+	Provider  string `json:"provider"`
+	Content   string `json:"content"`
+	Domain    string `json:"domain"`
 }

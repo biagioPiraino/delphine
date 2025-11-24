@@ -3,6 +3,7 @@ package consumers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 
 	"github.com/IBM/sarama"
@@ -38,16 +39,13 @@ func (h FinanceConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 	for msg := range claim.Messages() {
 		switch msg.Topic {
 		case "finance":
-			var article repositories.FinanceArticle
-			json.NewDecoder(bytes.NewReader(msg.Value)).Decode(&article)
-			if err := h.Repository.AddFinanceArticle(article); err != nil {
-				log.Printf("%v", err)
+			var article repositories.Article
+			if err := json.NewDecoder(bytes.NewReader(msg.Value)).Decode(&article); err != nil {
+				fmt.Printf("error decoding finance article, continuing...\n%v", err)
+				continue
 			}
-		case "finance-metadata":
-			var metadata repositories.FinanceArticleMetadata
-			json.NewDecoder(bytes.NewReader(msg.Value)).Decode(&metadata)
-			if err := h.Repository.AddFinanceMetadata(metadata); err != nil {
-				log.Printf("%v", err)
+			if err := h.Repository.AddFinanceArticle(article); err != nil {
+				fmt.Printf("%v\n", err)
 			}
 		}
 

@@ -103,12 +103,13 @@ func (yc *YahooCrawler) ScrapeWebsite(
 		}
 
 		art := types.Article{
-			Url:      e.Request.URL.String(),
-			Author:   author,
-			Title:    title,
-			Provider: "Yahoo Finance",
-			Domain:   types.FinanceDomain,
-			Content:  article,
+			Url:       e.Request.URL.String(),
+			Author:    author,
+			Title:     title,
+			Provider:  "Yahoo Finance",
+			Domain:    types.FinanceDomain.String(),
+			Content:   article,
+			Published: published,
 		}
 		artChan <- art
 	})

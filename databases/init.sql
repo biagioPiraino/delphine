@@ -8,12 +8,12 @@ LIMIT 99;
 
 GRANT CONNECT ON DATABASE delphine TO delphine_scrapers;
 
-CREATE SCHEMA IF NOT EXISTS kb_finance;
+CREATE SCHEMA IF NOT EXISTS kb;
 
-GRANT USAGE ON SCHEMA kb_finance TO delphine_scrapers;
+GRANT USAGE ON SCHEMA kb TO delphine_scrapers;
 
 GRANT
 SELECT,
 INSERT,
 UPDATE,
-DELETE ON ALL TABLES IN SCHEMA kb_finance to delphine_scrapers;
+DELETE ON ALL TABLES IN SCHEMA kb to delphine_scrapers;

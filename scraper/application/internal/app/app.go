@@ -96,8 +96,8 @@ func (a *App) Run() {
 			}
 
 			msg := &sarama.ProducerMessage{
-				Topic: article.Domain.ToString(),
-				Key:   sarama.StringEncoder(article.Domain.ToString()),
+				Topic: article.Domain,
+				Key:   sarama.StringEncoder(article.Domain),
 				Value: sarama.ByteEncoder(payload),
 			}
 			a.producer.Input() <- msg
