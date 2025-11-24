@@ -1,12 +1,11 @@
-package scrapers
+package crawlers
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"regexp"
-	"time"
+	"sync"
 
 	"github.com/biagioPiraino/delphico/scraper/internal/logger"
 	"github.com/biagioPiraino/delphico/scraper/internal/types"
@@ -22,7 +21,7 @@ const contentSelector = ".mainContainer .body-wrap .body .bodyItems-wrapper"
 const readmoreSelector = ".mainContainer .body-wrap .body .read-more-wrapper"
 const provider = "Yahoo Finance"
 
-type YahooScraper struct{}
+type YahooCrawler struct{}
 
 type contextTransport struct {
 	ctx   context.Context
@@ -34,11 +33,17 @@ func (t *contextTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return t.trans.RoundTrip(req)
 }
 
-func NewReutersScraper() *YahooScraper {
-	return &YahooScraper{}
+func NewYahooCrawler() *YahooCrawler {
+	return &YahooCrawler{}
 }
 
-func (s *YahooScraper) ScrapeWebsite(ctx context.Context, artChan chan types.Article, mdChan chan types.ArticleMetadata) {
+func (s *YahooCrawler) ScrapeWebsite(
+	wg *sync.WaitGroup,
+	ctx context.Context,
+	artChan chan types.Article,
+	mdChan chan types.ArticleMetadata) {
+	defer wg.Done()
+
 	c := colly.NewCollector(
 		colly.Async(true),
 		colly.MaxDepth(3), // leave to 0 default in production to keep scraping the site
@@ -49,18 +54,16 @@ func (s *YahooScraper) ScrapeWebsite(ctx context.Context, artChan chan types.Art
 	c.AllowURLRevisit = false
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*uk.finance.yahoo*",
-		Parallelism: 2,
-		Delay:       2 * time.Second,
-		RandomDelay: 4 * time.Second,
+		Parallelism: 1,
 	})
 
 	c.OnRequest(func(request *colly.Request) {
 		select {
 		case <-ctx.Done():
-			log.Println("ctx done, aborting request...")
+			fmt.Println("ctx done, aborting request...")
 			request.Abort()
 		default:
-
+			// keep scraping in default case
 		}
 	})
 

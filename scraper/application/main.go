@@ -1,12 +1,12 @@
 package main
 
 import (
-	"github.com/biagioPiraino/delphico/scraper/internal/engine"
+	"github.com/biagioPiraino/delphico/scraper/internal/app"
 	"github.com/biagioPiraino/delphico/scraper/internal/logger"
 )
 
 func main() {
 	logger.InitLogger()
-	engine := engine.InitialiseEngine()
-	engine.Run()
+	crawlerEngine := app.NewApp(app.Config{BrokerAddress: "localhost:9094"})
+	crawlerEngine.Run()
 }
