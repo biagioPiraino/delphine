@@ -55,21 +55,17 @@ func (a *App) Run() {
 
 	// launch sentinel goroutine that listen for syscall term and interrupt
 	go func() {
-		<-sigChan
-		fmt.Println("captured termination signal...exiting")
-		cancel() // propagate cancellation to all the children process coordinating closure of scrapers and producer
-	}()
-
-	// launch monitor goroutine that on cancel will wait the group to finish
-	// and close channels
-	go func() {
-		wg.Wait()
-		close(a.ingestionChannel)
+		select {
+		case <-sigChan:
+			fmt.Println("captured termination signal...exiting")
+			cancel() // propagate cancellation to all the children process coordinating closure of scrapers and producer
+		case <-ctx.Done():
+			// context cancelled by happy path, do not anything
+		}
 	}()
 
 	// channel for async production of messages to kafka
-	wg.Add(1)
-	go a.setupProducerResultsChannel(&wg, ctx)
+	go a.setupProducerResultsChannel(ctx)
 
 	// launching scraper go routines
 	for i := 0; i < len(a.crawlers); i++ {
@@ -80,13 +76,20 @@ func (a *App) Run() {
 		}()
 	}
 
-	// setup article and metadata channels receivers
-	for a.ingestionChannel != nil {
+	// launch monitor goroutine that on cancel will wait the group to finish
+	// and close channels
+	go func() {
+		wg.Wait()
+		close(a.ingestionChannel)
+	}()
+
+	// main loop to send msg to kafka
+loop:
+	for {
 		select {
 		case article, ok := <-a.ingestionChannel:
 			if !ok {
-				a.ingestionChannel = nil
-				continue
+				break loop // on channel closed when scraper are done break loop
 			}
 
 			payload, err := getArticlePayload(article)
@@ -100,7 +103,13 @@ func (a *App) Run() {
 				Key:   sarama.StringEncoder(article.Domain),
 				Value: sarama.ByteEncoder(payload),
 			}
-			a.producer.Input() <- msg
+			select {
+			case a.producer.Input() <- msg:
+			// sent
+			case <-ctx.Done():
+				break loop
+
+			}
 		}
 	}
 
@@ -124,8 +133,7 @@ func getArticlePayload(article types.Article) ([]byte, error) {
 	return payload, nil
 }
 
-func (a *App) setupProducerResultsChannel(wg *sync.WaitGroup, ctx context.Context) {
-	defer wg.Done()
+func (a *App) setupProducerResultsChannel(ctx context.Context) {
 	for {
 		select {
 		case <-a.producer.Successes():
@@ -147,7 +155,7 @@ func newCrawlers() []interfaces.ICrawler {
 	return []interfaces.ICrawler{
 		crawlers.NewYahooCrawler(crawlers.CrawlerConfig{
 			Root:         "https://uk.finance.yahoo.com/news",
-			MaxDepth:     10,
+			MaxDepth:     0,
 			DomainGlobal: "*uk.finance.yahoo*"}),
 	}
 }
