@@ -47,7 +47,12 @@ func NewApp(config Config) *App {
 
 func (a *App) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // cancelling context on happy path
+	defer func() {
+		fmt.Println("crawling terminated, releasing resources") // exiting gracefully
+		cancel()                                                // cancelling context on happy path
+		time.Sleep(2 * time.Second)                             // allow sarama producer to be correctly closed
+		fmt.Println("resources released correctly, exiting")
+	}()
 
 	wg := sync.WaitGroup{}
 	sigChan := make(chan os.Signal, 1)
@@ -77,6 +82,7 @@ func (a *App) Run() {
 	go func() {
 		wg.Wait()
 		close(a.ingestionChannel)
+		fmt.Println("article channel closed")
 	}()
 
 	// main loop to send msg to kafka
@@ -103,14 +109,11 @@ loop:
 			case a.producer.Input() <- msg:
 			// message sent, blocking
 			case <-ctx.Done():
-				break loop // break loop so to trigger happy path cancellation or exiting on sig int / term
+				break loop // break loop so to trigger the happy path cancellation or exiting on sig int / term
 			}
 		}
 	}
 
-	// exiting gracefully
-	fmt.Println("application interrupted correctly, channels and resources closed")
-	os.Exit(0)
 }
 
 func getArticlePayload(article types.Article) ([]byte, error) {
@@ -139,7 +142,7 @@ func (a *App) setupProducerResultsChannel(ctx context.Context) {
 			if err := a.producer.Close(); err != nil {
 				fmt.Println("sarama producer not closed correctly")
 			} else {
-				fmt.Println("request have been cancelled, sarama producer closed correctly")
+				fmt.Println("sarama producer closed correctly")
 			}
 			return
 		}
