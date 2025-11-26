@@ -59,10 +59,8 @@ func (a *App) Run() {
 	}()
 
 	var wg sync.WaitGroup
-	for i := 0; i < len("zzz"); i++ {
-		wg.Add(1)
-		go a.runFinanceConsumerGroup(db, &wg, ctx)
-	}
+	wg.Add(1)
+	go a.runFinanceConsumerGroup(db, &wg, ctx)
 
 	wg.Wait()
 	fmt.Println("all consumers are shut down")

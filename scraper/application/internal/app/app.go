@@ -72,9 +72,9 @@ func (a *App) Run() {
 	for i := 0; i < len(a.crawlers); i++ {
 		scraper := a.crawlers[i]
 		wg.Add(1)
-		go func() {
-			scraper.ScrapeWebsite(&wg, ctx, a.ingestionChannel)
-		}()
+		go func(s interfaces.ICrawler) {
+			s.ScrapeWebsite(&wg, ctx, a.ingestionChannel)
+		}(scraper)
 	}
 
 	// launch monitor goroutine that on cancel will wait the group to finish
@@ -153,8 +153,17 @@ func newCrawlers() []interfaces.ICrawler {
 	return []interfaces.ICrawler{
 		crawlers.NewYahooCrawler(crawlers.CrawlerConfig{
 			Root:         "https://uk.finance.yahoo.com/news",
-			MaxDepth:     0,
+			MaxDepth:     10,
+			Parallelism:  2,
+			AllowRevisit: false,
 			DomainGlobal: "*uk.finance.yahoo*"}),
+
+		crawlers.NewIndependentCrawler(crawlers.CrawlerConfig{
+			Root:         "https://independent.co.uk/money",
+			MaxDepth:     10,
+			Parallelism:  2,
+			AllowRevisit: false,
+			DomainGlobal: "*independent*"}),
 	}
 }
 

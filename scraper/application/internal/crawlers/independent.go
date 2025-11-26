@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/biagioPiraino/delphico/scraper/internal/logger"
 	"github.com/biagioPiraino/delphico/scraper/internal/types"
@@ -15,17 +15,17 @@ import (
 	"github.com/google/uuid"
 )
 
-type YahooCrawler struct {
+type IndependentCrawler struct {
 	config CrawlerConfig
 }
 
-func NewYahooCrawler(config CrawlerConfig) *YahooCrawler {
-	return &YahooCrawler{
+func NewIndependentCrawler(config CrawlerConfig) *IndependentCrawler {
+	return &IndependentCrawler{
 		config: config,
 	}
 }
 
-func (yc *YahooCrawler) ScrapeWebsite(
+func (cr *IndependentCrawler) ScrapeWebsite(
 	wg *sync.WaitGroup,
 	ctx context.Context,
 	artChan chan types.Article) {
@@ -33,15 +33,17 @@ func (yc *YahooCrawler) ScrapeWebsite(
 
 	c := colly.NewCollector(
 		colly.Async(true),
-		colly.MaxDepth(yc.config.MaxDepth), // leave to 0 default in production to keep scraping the site
-		colly.URLFilters(regexp.MustCompile("^"+regexp.QuoteMeta(yc.config.Root))),
+		colly.MaxDepth(cr.config.MaxDepth), // leave to 0 default in production to keep scraping the site
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	)
-	c.AllowURLRevisit = yc.config.AllowRevisit
+
+	c.AllowURLRevisit = cr.config.AllowRevisit
 
 	err := c.Limit(&colly.LimitRule{
-		DomainGlob:  yc.config.DomainGlobal,
-		Parallelism: yc.config.Parallelism,
+		DomainGlob:  cr.config.DomainGlobal,
+		Parallelism: cr.config.Parallelism,
+		Delay:       2 * time.Second,
+		RandomDelay: 3 * time.Second,
 	})
 	if err != nil {
 		fmt.Println("Unable to setup crawler limits. returning.")
@@ -70,33 +72,34 @@ func (yc *YahooCrawler) ScrapeWebsite(
 	// routing and visiting callback
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
-		err := e.Request.Visit(link)
-		if err != nil {
-			return
+		if e.Request.URL.Host == "www.independent.co.uk" &&
+			strings.Contains(link, "/money/") ||
+			strings.Contains(link, "/business/") {
+			err := e.Request.Visit(link)
+			if err != nil {
+				return
+			}
 		}
 	})
 
 	// extract content from article tag
 	c.OnHTML("article", func(e *colly.HTMLElement) {
-		article := e.ChildText(".article-wrap p")
+		article := e.ChildText(".main-wrapper #main h2, p")
 		if article == "" {
 			return
 		}
 
-		requestId := utils.GetRequestIdFromElement(e)
-		logger.LogRequest(requestId, fmt.Sprintf("found content at %s", e.Request.URL))
-
-		author := strings.Trim(strings.Split(e.ChildText(".byline-attr-author"), "·")[0], " ")
-		if author == "" {
-			author = "unknown"
-		}
-
-		title := e.ChildText(".cover-title")
+		title := e.ChildText("header h1")
 		if title == "" {
 			title = "unknown"
 		}
 
-		published := e.ChildText(".byline-attr-meta-time")
+		author := e.ChildText("header a[href*='author']")
+		if author == "" {
+			author = "unknown"
+		}
+
+		published := e.ChildText("#article-published-date")
 		if published == "" {
 			published = "unknown"
 		}
@@ -105,7 +108,7 @@ func (yc *YahooCrawler) ScrapeWebsite(
 			Url:       e.Request.URL.String(),
 			Author:    author,
 			Title:     title,
-			Provider:  "Yahoo Finance",
+			Provider:  "The Independent",
 			Domain:    types.FinanceDomain.String(),
 			Content:   article,
 			Published: published,
@@ -128,9 +131,9 @@ func (yc *YahooCrawler) ScrapeWebsite(
 		logger.LogRequest(requestId, fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e))
 	})
 
-	err = c.Visit(yc.config.Root)
+	err = c.Visit(cr.config.Root)
 	if err != nil {
-		fmt.Printf("error visiting %s. returning...\n", yc.config.Root)
+		fmt.Printf("error visiting %s. returning...\n", cr.config.Root)
 		return
 	}
 	c.Wait()
