@@ -111,7 +111,12 @@ func (yc *YahooCrawler) ScrapeWebsite(
 			Content:   article,
 			Published: published,
 		}
-		artChan <- art
+		select {
+		case artChan <- art:
+			return
+		case <-ctx.Done():
+			return
+		}
 	})
 
 	c.OnResponse(func(r *colly.Response) {
