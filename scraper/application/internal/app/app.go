@@ -48,8 +48,7 @@ func NewApp(config Config) *App {
 func worker(ctx context.Context, jobs <-chan types.Article, results chan<- *sarama.ProducerMessage) {
 	for j := range jobs {
 		select {
-		case <-ctx.Done():
-			fmt.Println("worker to exit due to context closure")
+		case <-ctx.Done(): // context is cancelled from parent, closing worker
 			return
 		default:
 			time.Sleep(1 * time.Second)
@@ -64,9 +63,7 @@ func worker(ctx context.Context, jobs <-chan types.Article, results chan<- *sara
 				Key:   sarama.StringEncoder(j.Domain),
 				Value: sarama.ByteEncoder(payload),
 			}
-			fmt.Println("sending msg to channel from worker")
 			results <- msg
-
 		}
 	}
 }
@@ -75,8 +72,8 @@ func (a *App) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
-		time.Sleep(3 * time.Second) // allow resources to close
-		fmt.Println("closing")
+		time.Sleep(1 * time.Second) // async results channel requires some buffer to be closed correclty
+		fmt.Println("resources released, exiting...")
 	}()
 
 	resultsChannel := make(chan *sarama.ProducerMessage)
@@ -105,22 +102,19 @@ func (a *App) Run() {
 		fmt.Println("captured termination signal...exiting")
 	}()
 
-	// main loop to send msg to kafka
 loop:
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("loop broken, exiting")
 			break loop
 		case msg := <-resultsChannel:
-			a.producer.Input() <- msg
-			fmt.Println("received message from results channel")
+			a.producer.Input() <- msg // sending results from channel to kafka
 		}
 	}
 
 	crawlerWg.Wait()
+	fmt.Println("task finished, closing channels and exiting")
 	close(a.ingestionChannel)
-	fmt.Println("article channel closed")
 }
 
 func getArticlePayload(article types.Article) ([]byte, error) {
@@ -150,9 +144,9 @@ func (a *App) setupProducerResultsChannel(ctx context.Context) {
 			}
 			return
 		case <-a.producer.Successes():
-			fmt.Println("msg sent correctly")
-		case <-a.producer.Errors():
-			fmt.Println("error in sending msg to kafka")
+			fmt.Println("[OK] message correctly sent to kafka")
+		case err := <-a.producer.Errors():
+			fmt.Printf("[ERR] error sending msg to kafka %s\n", err.Error())
 		}
 	}
 }

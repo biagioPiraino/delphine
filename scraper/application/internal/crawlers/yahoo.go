@@ -51,10 +51,10 @@ func (yc *YahooCrawler) ScrapeWebsite(
 	c.OnRequest(func(request *colly.Request) {
 		select {
 		case <-ctx.Done():
-			fmt.Println("ctx done, aborting request from yahoo...")
+			fmt.Println("ctx done, aborting request from Yahoo Finance...")
 			request.Abort()
 		default:
-			// keep scraping in default case
+			// keep scraping in default case, adding id in header to keep track of request in case of error
 			requestId := uuid.New().String()
 			request.Headers.Add(utils.RequestIdHeader, requestId)
 			logger.LogRequest(requestId, fmt.Sprintf("visiting %s", request.URL))
@@ -83,9 +83,6 @@ func (yc *YahooCrawler) ScrapeWebsite(
 			return
 		}
 
-		requestId := utils.GetRequestIdFromElement(e)
-		logger.LogRequest(requestId, fmt.Sprintf("found content at %s", e.Request.URL))
-
 		author := strings.Trim(strings.Split(e.ChildText(".byline-attr-author"), "·")[0], " ")
 		if author == "" {
 			author = "unknown"
@@ -113,14 +110,10 @@ func (yc *YahooCrawler) ScrapeWebsite(
 		artChan <- art
 	})
 
-	c.OnResponse(func(r *colly.Response) {
-		requestId := utils.GetRequestIdFromResponse(r)
-		logger.LogRequest(requestId, fmt.Sprintf("finished visiting %s - response: %d", r.Request.URL, r.StatusCode))
-	})
-
 	c.OnError(func(r *colly.Response, e error) {
 		requestId := utils.GetRequestIdFromResponse(r)
-		logger.LogRequest(requestId, fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e))
+		msg := fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e)
+		logger.LogRequest(requestId, msg)
 	})
 
 	err = c.Visit(yc.config.Root)
@@ -131,7 +124,6 @@ func (yc *YahooCrawler) ScrapeWebsite(
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("exiting yahoo")
 			return
 		default:
 			c.Wait()

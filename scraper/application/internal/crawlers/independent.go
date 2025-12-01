@@ -52,11 +52,11 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 	c.OnRequest(func(request *colly.Request) {
 		select {
 		case <-ctx.Done():
-			fmt.Println("ctx done, aborting request from independent...")
+			fmt.Println("ctx done, aborting request from The Independent...")
 			request.Abort()
 			return
 		default:
-			// keep scraping in default case
+			// keep scraping in default case, adding id in header to keep track of request in case of error
 			requestId := uuid.New().String()
 			request.Headers.Add(utils.RequestIdHeader, requestId)
 			logger.LogRequest(requestId, fmt.Sprintf("visiting %s", request.URL))
@@ -119,14 +119,10 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 		artChan <- art
 	})
 
-	c.OnResponse(func(r *colly.Response) {
-		requestId := utils.GetRequestIdFromResponse(r)
-		logger.LogRequest(requestId, fmt.Sprintf("finished visiting %s - response: %d", r.Request.URL, r.StatusCode))
-	})
-
 	c.OnError(func(r *colly.Response, e error) {
 		requestId := utils.GetRequestIdFromResponse(r)
-		logger.LogRequest(requestId, fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e))
+		msg := fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e)
+		logger.LogRequest(requestId, msg)
 	})
 
 	err = c.Visit(cr.config.Root)
@@ -137,7 +133,6 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("exiting independent")
 			return
 		default:
 			c.Wait()
