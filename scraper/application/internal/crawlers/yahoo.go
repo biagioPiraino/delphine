@@ -28,7 +28,7 @@ func NewYahooCrawler(config CrawlerConfig) *YahooCrawler {
 func (yc *YahooCrawler) ScrapeWebsite(
 	wg *sync.WaitGroup,
 	ctx context.Context,
-	artChan chan types.Article) {
+	artChan chan<- types.Article) {
 	defer wg.Done()
 
 	c := colly.NewCollector(
@@ -51,7 +51,7 @@ func (yc *YahooCrawler) ScrapeWebsite(
 	c.OnRequest(func(request *colly.Request) {
 		select {
 		case <-ctx.Done():
-			fmt.Println("ctx done, aborting request...")
+			fmt.Println("ctx done, aborting request from yahoo...")
 			request.Abort()
 		default:
 			// keep scraping in default case
@@ -110,12 +110,7 @@ func (yc *YahooCrawler) ScrapeWebsite(
 			Content:   article,
 			Published: published,
 		}
-		select {
-		case artChan <- art:
-			return
-		case <-ctx.Done():
-			return
-		}
+		artChan <- art
 	})
 
 	c.OnResponse(func(r *colly.Response) {
@@ -133,5 +128,13 @@ func (yc *YahooCrawler) ScrapeWebsite(
 		fmt.Printf("error visiting %s. returning...\n", yc.config.Root)
 		return
 	}
-	c.Wait()
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("exiting yahoo")
+			return
+		default:
+			c.Wait()
+		}
+	}
 }

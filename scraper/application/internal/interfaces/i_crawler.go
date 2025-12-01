@@ -11,6 +11,6 @@ type ICrawler interface {
 	ScrapeWebsite(
 		wg *sync.WaitGroup,
 		ctx context.Context,
-		artChan chan types.Article,
+		artChan chan<- types.Article,
 	)
 }

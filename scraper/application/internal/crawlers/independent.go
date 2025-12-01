@@ -28,7 +28,7 @@ func NewIndependentCrawler(config CrawlerConfig) *IndependentCrawler {
 func (cr *IndependentCrawler) ScrapeWebsite(
 	wg *sync.WaitGroup,
 	ctx context.Context,
-	artChan chan types.Article) {
+	artChan chan<- types.Article) {
 	defer wg.Done()
 
 	c := colly.NewCollector(
@@ -42,8 +42,7 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 	err := c.Limit(&colly.LimitRule{
 		DomainGlob:  cr.config.DomainGlobal,
 		Parallelism: cr.config.Parallelism,
-		Delay:       2 * time.Second,
-		RandomDelay: 3 * time.Second,
+		Delay:       1 * time.Second,
 	})
 	if err != nil {
 		fmt.Println("Unable to setup crawler limits. returning.")
@@ -53,8 +52,9 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 	c.OnRequest(func(request *colly.Request) {
 		select {
 		case <-ctx.Done():
-			fmt.Println("ctx done, aborting request...")
+			fmt.Println("ctx done, aborting request from independent...")
 			request.Abort()
+			return
 		default:
 			// keep scraping in default case
 			requestId := uuid.New().String()
@@ -79,6 +79,9 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 			if err != nil {
 				return
 			}
+		} else {
+			e.Request.Abort()
+			return
 		}
 	})
 
@@ -113,12 +116,7 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 			Content:   article,
 			Published: published,
 		}
-		select {
-		case artChan <- art:
-			return
-		case <-ctx.Done():
-			return
-		}
+		artChan <- art
 	})
 
 	c.OnResponse(func(r *colly.Response) {
@@ -136,5 +134,13 @@ func (cr *IndependentCrawler) ScrapeWebsite(
 		fmt.Printf("error visiting %s. returning...\n", cr.config.Root)
 		return
 	}
-	c.Wait()
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("exiting independent")
+			return
+		default:
+			c.Wait()
+		}
+	}
 }

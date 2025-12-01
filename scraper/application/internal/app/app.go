@@ -45,75 +45,82 @@ func NewApp(config Config) *App {
 	}
 }
 
-func (a *App) Run() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer func() {
-		fmt.Println("crawling terminated, releasing resources") // exiting gracefully
-		cancel()                                                // cancelling context on happy path
-		time.Sleep(2 * time.Second)                             // allow sarama producer to be correctly closed
-		fmt.Println("resources released correctly, exiting")
-	}()
-
-	wg := sync.WaitGroup{}
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
-
-	// launch sentinel goroutine that listen for syscall term and interrupt
-	go func() {
-		<-sigChan
-		fmt.Println("captured termination signal...exiting")
-		cancel() // propagate cancellation to all the children process coordinating closure of scrapers and producer
-	}()
-
-	// channel for async production of messages to kafka
-	go a.setupProducerResultsChannel(ctx)
-
-	// launching scraper go routines
-	for i := 0; i < len(a.crawlers); i++ {
-		scraper := a.crawlers[i]
-		wg.Add(1)
-		go func(s interfaces.ICrawler) {
-			s.ScrapeWebsite(&wg, ctx, a.ingestionChannel)
-		}(scraper)
-	}
-
-	// launch monitor goroutine that on cancel will wait the group to finish
-	// and close channels
-	go func() {
-		wg.Wait()
-		close(a.ingestionChannel)
-		fmt.Println("article channel closed")
-	}()
-
-	// main loop to send msg to kafka
-loop:
-	for {
+func worker(ctx context.Context, jobs <-chan types.Article, results chan<- *sarama.ProducerMessage) {
+	for j := range jobs {
 		select {
-		case article, ok := <-a.ingestionChannel:
-			if !ok {
-				break loop // on channel closed when scraper are done break loop
-			}
-
-			payload, err := getArticlePayload(article)
+		case <-ctx.Done():
+			fmt.Println("worker to exit due to context closure")
+			return
+		default:
+			time.Sleep(1 * time.Second)
+			payload, err := getArticlePayload(j)
 			if err != nil {
 				fmt.Println("unable to create payload... continuing")
 				continue
 			}
 
 			msg := &sarama.ProducerMessage{
-				Topic: article.Domain,
-				Key:   sarama.StringEncoder(article.Domain),
+				Topic: j.Domain,
+				Key:   sarama.StringEncoder(j.Domain),
 				Value: sarama.ByteEncoder(payload),
 			}
-			select {
-			case a.producer.Input() <- msg:
-			// message sent, blocking
-			case <-ctx.Done():
-				break loop // break loop so to trigger the happy path cancellation or exiting on sig int / term
-			}
+			fmt.Println("sending msg to channel from worker")
+			results <- msg
+
+		}
+	}
+}
+
+func (a *App) Run() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+		time.Sleep(3 * time.Second) // allow resources to close
+		fmt.Println("closing")
+	}()
+
+	resultsChannel := make(chan *sarama.ProducerMessage)
+
+	for w := 0; w < 10; w++ {
+		go worker(ctx, a.ingestionChannel, resultsChannel)
+	}
+
+	var crawlerWg sync.WaitGroup
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	// channel for async production of messages to kafka
+	go a.setupProducerResultsChannel(ctx)
+
+	// launching scraper go routines
+	for i := 0; i < len(a.crawlers); i++ {
+		crawlerWg.Add(1)
+		crawler := a.crawlers[i]
+		go crawler.ScrapeWebsite(&crawlerWg, ctx, a.ingestionChannel)
+	}
+	// launch sentinel goroutine that listen for syscall term and interrupt
+	go func() {
+		defer cancel()
+		<-sigChan
+		fmt.Println("captured termination signal...exiting")
+	}()
+
+	// main loop to send msg to kafka
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("loop broken, exiting")
+			break loop
+		case msg := <-resultsChannel:
+			a.producer.Input() <- msg
+			fmt.Println("received message from results channel")
 		}
 	}
 
+	crawlerWg.Wait()
+	close(a.ingestionChannel)
+	fmt.Println("article channel closed")
 }
 
 func getArticlePayload(article types.Article) ([]byte, error) {
@@ -134,17 +141,18 @@ func getArticlePayload(article types.Article) ([]byte, error) {
 func (a *App) setupProducerResultsChannel(ctx context.Context) {
 	for {
 		select {
-		case <-a.producer.Successes():
-			fmt.Println("message passed to kafka correctly")
-		case <-a.producer.Errors():
-			fmt.Println("error in sending msg to kafka")
 		case <-ctx.Done():
+			fmt.Println("closing sarama producer")
 			if err := a.producer.Close(); err != nil {
 				fmt.Println("sarama producer not closed correctly")
 			} else {
 				fmt.Println("sarama producer closed correctly")
 			}
 			return
+		case <-a.producer.Successes():
+			fmt.Println("msg sent correctly")
+		case <-a.producer.Errors():
+			fmt.Println("error in sending msg to kafka")
 		}
 	}
 }
