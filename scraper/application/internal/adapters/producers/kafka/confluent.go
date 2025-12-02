@@ -1,0 +1,78 @@
+package kafka
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/biagioPiraino/delphico/scraper/internal/core/domain"
+	"github.com/biagioPiraino/delphico/scraper/internal/core/utils"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
+)
+
+type ConfluentProducer struct {
+	producer *kafka.Producer
+}
+
+func NewConfluentProducer(servers []string, id string) (*ConfluentProducer, error) {
+	bootstraps := strings.Join(servers, ",")
+	p, err := kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers": bootstraps,
+		"client.id":         id,
+		"acks":              "all",
+	})
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("[OK] producer initialised")
+	return &ConfluentProducer{producer: p}, nil
+}
+
+// Run this launches goroutine for message delivery
+func (p *ConfluentProducer) Run() {
+	go func() {
+		for e := range p.producer.Events() {
+			switch ev := e.(type) {
+			case *kafka.Message:
+				if ev.TopicPartition.Error != nil {
+					fmt.Printf("[ERR] failed to deliver message: %v\n", ev.TopicPartition)
+				} else {
+					var article domain.Article
+					if err := json.NewDecoder(bytes.NewReader(ev.Value)).Decode(&article); err != nil {
+						fmt.Printf("error decoding article sent to kafka: %v\n", err)
+					}
+					fmt.Printf("[OK] produced event to topic %s: key = %-10s value = %s\n",
+						*ev.TopicPartition.Topic, string(ev.Key), article.Url)
+				}
+			}
+		}
+	}()
+}
+
+func (p *ConfluentProducer) SendMessageToQueue(article domain.Article) error {
+	payload, err := utils.GetArticlePayload(article)
+	if err != nil {
+		return err
+	}
+	msg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: &article.Domain, Partition: kafka.PartitionAny},
+		Value:          payload,
+		Key:            []byte(article.Domain),
+		Timestamp:      time.Now().UTC(),
+	}
+
+	if err := p.producer.Produce(msg, nil); err != nil {
+		return err
+	}
+
+	p.producer.Flush(15 * 1000)
+	return nil
+}
+
+func (p *ConfluentProducer) Shutdown() {
+	p.producer.Flush(15 * 1000) // flushes out all the messages
+	p.producer.Close()
+	fmt.Println("[OK] producer closed correctly.")
+}
