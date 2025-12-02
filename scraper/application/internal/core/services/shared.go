@@ -1,9 +1,17 @@
-package crawlers
+package services
 
 import (
 	"context"
 	"net/http"
 )
+
+type CrawlerConfig struct {
+	Root         string
+	MaxDepth     int
+	DomainGlobal string
+	Parallelism  int
+	AllowRevisit bool
+}
 
 type contextTransport struct {
 	ctx   context.Context

@@ -1,47 +1,48 @@
-package crawlers
+package services
 
 import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/biagioPiraino/delphico/scraper/internal/core/domain"
+	"github.com/biagioPiraino/delphico/scraper/internal/core/utils"
 	"github.com/biagioPiraino/delphico/scraper/internal/logger"
-	"github.com/biagioPiraino/delphico/scraper/internal/types"
-	"github.com/biagioPiraino/delphico/scraper/internal/utils"
 	"github.com/gocolly/colly"
 	"github.com/google/uuid"
 )
 
-type YahooCrawler struct {
+type IndependentCrawler struct {
 	config CrawlerConfig
 }
 
-func NewYahooCrawler(config CrawlerConfig) *YahooCrawler {
-	return &YahooCrawler{
+func NewIndependentCrawler(config CrawlerConfig) *IndependentCrawler {
+	return &IndependentCrawler{
 		config: config,
 	}
 }
 
-func (yc *YahooCrawler) ScrapeWebsite(
+func (cr *IndependentCrawler) CrawlWebsite(
 	wg *sync.WaitGroup,
 	ctx context.Context,
-	artChan chan<- types.Article) {
+	artChan chan<- domain.Article) {
 	defer wg.Done()
 
 	c := colly.NewCollector(
 		colly.Async(true),
-		colly.MaxDepth(yc.config.MaxDepth), // leave to 0 default in production to keep scraping the site
-		colly.URLFilters(regexp.MustCompile("^"+regexp.QuoteMeta(yc.config.Root))),
+		colly.MaxDepth(cr.config.MaxDepth), // leave to 0 default in production to keep scraping the site
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	)
-	c.AllowURLRevisit = yc.config.AllowRevisit
+
+	c.AllowURLRevisit = cr.config.AllowRevisit
 
 	err := c.Limit(&colly.LimitRule{
-		DomainGlob:  yc.config.DomainGlobal,
-		Parallelism: yc.config.Parallelism,
+		DomainGlob:  cr.config.DomainGlobal,
+		Parallelism: cr.config.Parallelism,
+		Delay:       1 * time.Second,
 	})
 	if err != nil {
 		fmt.Println("Unable to setup crawler limits. returning.")
@@ -51,8 +52,9 @@ func (yc *YahooCrawler) ScrapeWebsite(
 	c.OnRequest(func(request *colly.Request) {
 		select {
 		case <-ctx.Done():
-			fmt.Println("ctx done, aborting request from Yahoo Finance...")
+			fmt.Println("ctx done, aborting request from The Independent...")
 			request.Abort()
+			return
 		default:
 			// keep scraping in default case, adding id in header to keep track of request in case of error
 			requestId := uuid.New().String()
@@ -70,40 +72,47 @@ func (yc *YahooCrawler) ScrapeWebsite(
 	// routing and visiting callback
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
-		err := e.Request.Visit(link)
-		if err != nil {
+		if e.Request.URL.Host == "www.independent.co.uk" &&
+			strings.Contains(link, "/money/") ||
+			strings.Contains(link, "/business/") {
+			err := e.Request.Visit(link)
+			if err != nil {
+				return
+			}
+		} else {
+			e.Request.Abort()
 			return
 		}
 	})
 
 	// extract content from article tag
 	c.OnHTML("article", func(e *colly.HTMLElement) {
-		article := e.ChildText(".article-wrap p")
+		article := e.ChildText(".main-wrapper #main h2, p")
 		if article == "" {
 			return
 		}
 
-		author := strings.Trim(strings.Split(e.ChildText(".byline-attr-author"), "·")[0], " ")
-		if author == "" {
-			author = "unknown"
-		}
-
-		title := e.ChildText(".cover-title")
+		title := e.ChildText("header h1")
 		if title == "" {
 			title = "unknown"
 		}
 
-		published := e.ChildText(".byline-attr-meta-time")
+		author := e.ChildText("header a[href*='author']")
+		if author == "" {
+			author = "unknown"
+		}
+
+		published := e.ChildText("#article-published-date")
 		if published == "" {
 			published = "unknown"
 		}
 
-		art := types.Article{
+		art := domain.Article{
 			Url:       e.Request.URL.String(),
 			Author:    author,
 			Title:     title,
-			Provider:  "Yahoo Finance",
-			Domain:    types.FinanceDomain.String(),
+			Provider:  "The Independent",
+			Domain:    domain.FinanceDomain.String(),
 			Content:   article,
 			Published: published,
 		}
@@ -116,9 +125,9 @@ func (yc *YahooCrawler) ScrapeWebsite(
 		logger.LogRequest(requestId, msg)
 	})
 
-	err = c.Visit(yc.config.Root)
+	err = c.Visit(cr.config.Root)
 	if err != nil {
-		fmt.Printf("error visiting %s. returning...\n", yc.config.Root)
+		fmt.Printf("error visiting %s. returning...\n", cr.config.Root)
 		return
 	}
 	for {

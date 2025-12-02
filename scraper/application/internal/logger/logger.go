@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/biagioPiraino/delphico/scraper/internal/utils"
+	"github.com/biagioPiraino/delphico/scraper/internal/core/utils"
 )
 
 var (
