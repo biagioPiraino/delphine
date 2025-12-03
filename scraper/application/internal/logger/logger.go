@@ -55,7 +55,6 @@ func (i *InternalLogger) Close() {
 	close(i.buffer)
 	i.syncGroup.Wait()
 	fmt.Println("worker terminated, flushing and closing file")
-	i.writer.Flush()
 	if i.logfile != nil {
 		if err := i.logfile.Close(); err != nil {
 			log.Printf("error while closing logging file: %v\n", err)
