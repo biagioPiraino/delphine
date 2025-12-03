@@ -24,17 +24,22 @@ type App struct {
 	config   Config
 	crawlers []ports.Crawler
 	producer ports.Producer
+	logger   ports.Logger
 }
 
 func NewApp(config Config) *App {
-	logger.InitLogger()
+	internalLogger, err := logger.NewLogger("./logs", "logs")
+	if err != nil {
+		log.Fatalf("[ERR] error initialising logger %v\n", err)
+	}
 	producer, err := kafka.NewConfluentProducer([]string{config.BrokerAddress}, "confluent_00")
 	if err != nil {
 		log.Fatalf("[ERR] error initialising producer %v\n", err)
 	}
-	engines := newCrawlers()
+	engines := newCrawlers(internalLogger)
 
 	return &App{
+		logger:   internalLogger,
 		crawlers: engines,
 		producer: producer,
 		config:   config,
@@ -48,6 +53,7 @@ func (a *App) Run() {
 		cancel()
 		a.producer.Shutdown()
 		articleChan = nil // setting to nil to prevent panic attacks on sending article to closed channels
+		a.logger.Close()
 		fmt.Println("resources released, exiting...")
 	}()
 	a.producer.Run()
@@ -86,16 +92,16 @@ loop:
 	fmt.Println("task finished, closing channels and exiting")
 }
 
-func newCrawlers() []ports.Crawler {
+func newCrawlers(logger ports.Logger) []ports.Crawler {
 	return []ports.Crawler{
-		services.NewYahooCrawler(services.CrawlerConfig{
+		services.NewYahooCrawler(logger, services.CrawlerConfig{
 			Root:         "https://uk.finance.yahoo.com/news",
 			MaxDepth:     10,
 			Parallelism:  2,
 			AllowRevisit: false,
 			DomainGlobal: "*uk.finance.yahoo*"}),
 
-		services.NewIndependentCrawler(services.CrawlerConfig{
+		services.NewIndependentCrawler(logger, services.CrawlerConfig{
 			Root:         "https://independent.co.uk/money",
 			MaxDepth:     10,
 			Parallelism:  2,

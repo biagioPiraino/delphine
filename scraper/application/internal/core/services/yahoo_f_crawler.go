@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -9,18 +10,20 @@ import (
 	"sync"
 
 	"github.com/biagioPiraino/delphico/scraper/internal/core/domain"
+	"github.com/biagioPiraino/delphico/scraper/internal/core/ports"
 	"github.com/biagioPiraino/delphico/scraper/internal/core/utils"
-	"github.com/biagioPiraino/delphico/scraper/internal/logger"
 	"github.com/gocolly/colly"
 	"github.com/google/uuid"
 )
 
 type YahooCrawler struct {
+	logger ports.Logger
 	config CrawlerConfig
 }
 
-func NewYahooCrawler(config CrawlerConfig) *YahooCrawler {
+func NewYahooCrawler(logger ports.Logger, config CrawlerConfig) *YahooCrawler {
 	return &YahooCrawler{
+		logger: logger,
 		config: config,
 	}
 }
@@ -57,7 +60,7 @@ func (yc *YahooCrawler) CrawlWebsite(
 			// keep scraping in default case, adding id in header to keep track of request in case of error
 			requestId := uuid.New().String()
 			request.Headers.Add(utils.RequestIdHeader, requestId)
-			logger.LogRequest(requestId, fmt.Sprintf("visiting %s", request.URL))
+			yc.logger.LogDebug(requestId, fmt.Sprintf("visiting %s", request.URL))
 		}
 	})
 
@@ -115,8 +118,9 @@ func (yc *YahooCrawler) CrawlWebsite(
 
 	c.OnError(func(r *colly.Response, e error) {
 		requestId := utils.GetRequestIdFromResponse(r)
-		msg := fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e)
-		logger.LogRequest(requestId, msg)
+		errMsg := fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e)
+		err := errors.New(errMsg)
+		yc.logger.LogError(requestId, err)
 	})
 
 	err = c.Visit(yc.config.Root)

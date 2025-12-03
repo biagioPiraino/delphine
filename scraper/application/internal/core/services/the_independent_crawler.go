@@ -2,24 +2,27 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 
 	"github.com/biagioPiraino/delphico/scraper/internal/core/domain"
+	"github.com/biagioPiraino/delphico/scraper/internal/core/ports"
 	"github.com/biagioPiraino/delphico/scraper/internal/core/utils"
-	"github.com/biagioPiraino/delphico/scraper/internal/logger"
 	"github.com/gocolly/colly"
 	"github.com/google/uuid"
 )
 
 type IndependentCrawler struct {
+	logger ports.Logger
 	config CrawlerConfig
 }
 
-func NewIndependentCrawler(config CrawlerConfig) *IndependentCrawler {
+func NewIndependentCrawler(logger ports.Logger, config CrawlerConfig) *IndependentCrawler {
 	return &IndependentCrawler{
+		logger: logger,
 		config: config,
 	}
 }
@@ -56,7 +59,7 @@ func (cr *IndependentCrawler) CrawlWebsite(
 			// keep scraping in default case, adding id in header to keep track of request in case of error
 			requestId := uuid.New().String()
 			request.Headers.Add(utils.RequestIdHeader, requestId)
-			logger.LogRequest(requestId, fmt.Sprintf("visiting %s", request.URL))
+			cr.logger.LogDebug(requestId, fmt.Sprintf("visiting %s", request.URL))
 		}
 	})
 
@@ -118,8 +121,9 @@ func (cr *IndependentCrawler) CrawlWebsite(
 
 	c.OnError(func(r *colly.Response, e error) {
 		requestId := utils.GetRequestIdFromResponse(r)
-		msg := fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e)
-		logger.LogRequest(requestId, msg)
+		errMsg := fmt.Sprintf("error while visting %s - response: %d - details: \"%v\"", r.Request.URL, r.StatusCode, e)
+		err := errors.New(errMsg)
+		cr.logger.LogError(requestId, err)
 	})
 
 	err = c.Visit(cr.config.Root)

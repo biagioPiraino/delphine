@@ -1,81 +1,120 @@
 package logger
 
 import (
+	"encoding/csv"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/biagioPiraino/delphico/scraper/internal/core/utils"
 )
 
-var (
-	logPath string
-)
-
-func InitLogger() {
-	file, err := createLogFile()
-
-	if err != nil {
-		log.Fatalf("Error creating or opening log file: %v\n", err)
-	}
-
-	defer closeLogFile(file)
-
-	// remove default timestamp to respect csv format
-	log.SetFlags(0)
-	log.SetOutput(file)
-
-	log.Printf("%s,%d,logger initialised", utils.Now(), os.Getpid())
-	file.Sync()
+type InternalLogger struct {
+	writer    *csv.Writer
+	logfile   *os.File
+	buffer    chan []string
+	syncGroup *sync.WaitGroup
 }
 
-func LogRequest(requestId string, action string) {
-	file, err := os.OpenFile(logPath, os.O_RDWR|os.O_APPEND, 0666)
+func NewLogger(dirTgt string, filename string) (*InternalLogger, error) {
+	file, err := createDirAndFile(dirTgt, filename)
 	if err != nil {
-		fmt.Printf("error while logging, cannot open file: %v", err)
-		return
+		return nil, err
 	}
-	defer closeLogFile(file)
+	writer := csv.NewWriter(file)
 
-	log.SetFlags(0)
-	log.SetOutput(file)
-	log.Printf("%s,%s,%s", utils.Now(), requestId, action)
-	file.Sync()
+	// launching worker to process buffered requests
+	buffer := make(chan []string)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go loggerWorker(&wg, writer, buffer)
+
+	fmt.Println("logger initialised correctly")
+	return &InternalLogger{
+		writer:    writer,
+		logfile:   file,
+		buffer:    buffer,
+		syncGroup: &wg,
+	}, nil
 }
 
-func createLogFile() (*os.File, error) {
-	// Create a filename for today's logging
-	filename := strings.Join([]string{today() + "_scraper_requests", "csv"}, ".")
+func (i *InternalLogger) LogDebug(requestId string, operation string) {
+	i.buffer <- []string{utils.Now(), requestId, operation, "OK"}
+}
 
-	// Define the relative path to where to store the logs
-	logDir := filepath.Join("logs")
+func (i *InternalLogger) LogError(requestId string, err error) {
+	fmtError := fmt.Sprintf("%v", err)
+	i.buffer <- []string{utils.Now(), requestId, fmtError, "ERR"}
+}
 
-	// Ensure the logs directory exists; if not, create it
-	err := os.MkdirAll(logDir, os.ModePerm)
+func (i *InternalLogger) Close() {
+	close(i.buffer)
+	i.syncGroup.Wait()
+	fmt.Println("worker terminated, flushing and closing file")
+	i.writer.Flush()
+	if i.logfile != nil {
+		if err := i.logfile.Close(); err != nil {
+			log.Printf("error while closing logging file: %v\n", err)
+		} else {
+			fmt.Println("logging file closed correctly")
+		}
+	}
+}
+
+func loggerWorker(wg *sync.WaitGroup, writer *csv.Writer, buffer <-chan []string) {
+	defer wg.Done()
+	var requests [][]string
+	var mutex sync.RWMutex
+	for request := range buffer {
+		if len(requests) >= 50 {
+			mutex.Lock()
+			flushRequestsToDisk(writer, requests)
+			requests = requests[:0]
+			requests = append(requests, request)
+			mutex.Unlock()
+		} else {
+			mutex.Lock()
+			requests = append(requests, request)
+			mutex.Unlock()
+		}
+	}
+
+	// on return, flush out remaining of requests to avoid losing data
+	if len(requests) > 0 {
+		flushRequestsToDisk(writer, requests)
+	}
+}
+
+func flushRequestsToDisk(writer *csv.Writer, requests [][]string) {
+	sort.Slice(requests, func(i, j int) bool {
+		return requests[i][0] > requests[j][0]
+	})
+
+	for _, r := range requests {
+		if err := writer.Write(r); err != nil {
+			log.Printf("error writing on log file %v", err)
+		}
+	}
+	writer.Flush()
+}
+
+func createDirAndFile(dirTgt string, filename string) (*os.File, error) {
+	fnWithExt := strings.Join([]string{utils.Today() + "-" + filename, "csv"}, ".")
+
+	err := os.MkdirAll(dirTgt, 0755)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create file
-	logPath = filepath.Join(logDir, filename)
-	file, err := os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	logPath := filepath.Join(dirTgt, fnWithExt)
+	file, err := os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, err
 	}
 
 	return file, nil
-}
-
-func closeLogFile(file *os.File) {
-	err := file.Close()
-	if err != nil {
-		log.Printf("Error closing log file %s: %v", file.Name(), err)
-	}
-}
-
-func today() string {
-	return time.Now().UTC().Format("2006-01-02")
 }
