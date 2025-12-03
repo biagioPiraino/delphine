@@ -107,7 +107,10 @@ func (yc *YahooCrawler) CrawlWebsite(
 			Content:   article,
 			Published: published,
 		}
-		artChan <- art
+
+		if artChan != nil {
+			artChan <- art
+		}
 	})
 
 	c.OnError(func(r *colly.Response, e error) {
@@ -121,12 +124,6 @@ func (yc *YahooCrawler) CrawlWebsite(
 		fmt.Printf("error visiting %s. returning...\n", yc.config.Root)
 		return
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			c.Wait()
-		}
-	}
+
+	<-ctx.Done()
 }

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/biagioPiraino/delphico/scraper/internal/core/domain"
 	"github.com/biagioPiraino/delphico/scraper/internal/core/utils"
@@ -42,7 +41,6 @@ func (cr *IndependentCrawler) CrawlWebsite(
 	err := c.Limit(&colly.LimitRule{
 		DomainGlob:  cr.config.DomainGlobal,
 		Parallelism: cr.config.Parallelism,
-		Delay:       1 * time.Second,
 	})
 	if err != nil {
 		fmt.Println("Unable to setup crawler limits. returning.")
@@ -54,7 +52,6 @@ func (cr *IndependentCrawler) CrawlWebsite(
 		case <-ctx.Done():
 			fmt.Println("ctx done, aborting request from The Independent...")
 			request.Abort()
-			return
 		default:
 			// keep scraping in default case, adding id in header to keep track of request in case of error
 			requestId := uuid.New().String()
@@ -79,9 +76,6 @@ func (cr *IndependentCrawler) CrawlWebsite(
 			if err != nil {
 				return
 			}
-		} else {
-			e.Request.Abort()
-			return
 		}
 	})
 
@@ -116,7 +110,10 @@ func (cr *IndependentCrawler) CrawlWebsite(
 			Content:   article,
 			Published: published,
 		}
-		artChan <- art
+
+		if artChan != nil {
+			artChan <- art
+		}
 	})
 
 	c.OnError(func(r *colly.Response, e error) {
@@ -130,12 +127,6 @@ func (cr *IndependentCrawler) CrawlWebsite(
 		fmt.Printf("error visiting %s. returning...\n", cr.config.Root)
 		return
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			c.Wait()
-		}
-	}
+
+	<-ctx.Done()
 }

@@ -70,8 +70,7 @@ func (a *App) Run() {
 	defer func() {
 		cancel()
 		a.producer.Shutdown()
-		// time.Sleep(1 * time.Second)
-		close(articleChan)
+		articleChan = nil // setting to nil to prevent panic attacks on sending article to closed channels
 		fmt.Println("resources released, exiting...")
 	}()
 
@@ -126,11 +125,11 @@ func newCrawlers() []ports.Crawler {
 			AllowRevisit: false,
 			DomainGlobal: "*uk.finance.yahoo*"}),
 
-		//	services.NewIndependentCrawler(services.CrawlerConfig{
-		//		Root:         "https://independent.co.uk/money",
-		//		MaxDepth:     10,
-		//		Parallelism:  2,
-		//		AllowRevisit: false,
-		//		DomainGlobal: "*independent*"}),
+		services.NewIndependentCrawler(services.CrawlerConfig{
+			Root:         "https://independent.co.uk/money",
+			MaxDepth:     10,
+			Parallelism:  2,
+			AllowRevisit: false,
+			DomainGlobal: "*independent.*"}),
 	}
 }
