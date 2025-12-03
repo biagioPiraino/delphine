@@ -41,29 +41,6 @@ func NewApp(config Config) *App {
 	}
 }
 
-//func worker(ctx context.Context, jobs <-chan domain.Article, results chan<- *sarama.ProducerMessage) {
-//	for j := range jobs {
-//		select {
-//		case <-ctx.Done(): // context is cancelled from parent, closing worker
-//			return
-//		default:
-//			time.Sleep(1 * time.Second)
-//			payload, err := getArticlePayload(j)
-//			if err != nil {
-//				fmt.Println("unable to create payload... continuing")
-//				continue
-//			}
-//
-//			msg := &sarama.ProducerMessage{
-//				Topic: j.Domain,
-//				Key:   sarama.StringEncoder(j.Domain),
-//				Value: sarama.ByteEncoder(payload),
-//			}
-//			results <- msg
-//		}
-//	}
-//}
-
 func (a *App) Run() {
 	articleChan := make(chan domain.Article)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -73,14 +50,7 @@ func (a *App) Run() {
 		articleChan = nil // setting to nil to prevent panic attacks on sending article to closed channels
 		fmt.Println("resources released, exiting...")
 	}()
-
 	a.producer.Run()
-
-	//	resultsChannel := make(chan *sarama.ProducerMessage)
-
-	//	for w := 0; w < 10; w++ {
-	//		go worker(ctx, a.ingestionChannel, resultsChannel)
-	//	}
 
 	var crawlerWg sync.WaitGroup
 	sigChan := make(chan os.Signal, 1)
