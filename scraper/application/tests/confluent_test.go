@@ -43,9 +43,7 @@ func createTopicWithAdminClient(ctx context.Context, address string, topic strin
 	return nil
 }
 
-func Test_SendMessageToKafka(t *testing.T) {
-	ctx := context.Background()
-
+func setupKafkaContainer(ctx context.Context, topic string) (*tc_kafka.KafkaContainer, error) {
 	kafkaContainer, err := tc_kafka.Run(ctx,
 		"confluentinc/cp-kafka:7.4.0",
 		tc_kafka.WithClusterID("test-cluster"),
@@ -55,31 +53,59 @@ func Test_SendMessageToKafka(t *testing.T) {
 	)
 
 	if err != nil {
-		t.Fatalf("failed to start container: %s", err)
+		return nil, err
+	}
+
+	brokerURL, err := kafkaContainer.Brokers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	brokerAddress := brokerURL[0]
+
+	if err := createTopicWithAdminClient(ctx, brokerAddress, topic); err != nil {
+		return kafkaContainer, err
+	}
+
+	return kafkaContainer, nil
+}
+
+func createMockArticle() domain.Article {
+	return domain.Article{
+		Domain:    domain.FinanceDomain.String(),
+		Url:       "https://foo.bar",
+		Author:    "Foo Bar",
+		Published: "2025-12-05",
+		Provider:  "Acme Inc.",
+		Content:   "This is a finance article",
+	}
+}
+
+func Test_SendMessageToKafka(t *testing.T) {
+	ctx := context.Background()
+	kafkaContainer, err := setupKafkaContainer(ctx, "finance")
+	if err != nil {
+		if kafkaContainer != nil { // at this stage the container can be initialised and error only on topic creation
+			if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
+				t.Errorf("failed to terminate container: %v", err) // just logging error, fatal comes afterwards
+			}
+		}
+		t.Fatalf("failed to start container: %v", err)
 	}
 
 	t.Cleanup(func() {
 		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
-			t.Errorf("failed to terminate container: %s", err)
+			t.Errorf("failed to terminate container: %v", err)
 		}
 	})
 
-	brokerURL, err := kafkaContainer.Brokers(ctx)
+	brokerUrl, err := kafkaContainer.Brokers(ctx)
 	if err != nil {
-		t.Fatalf("failed to get broker URL: %v", err)
-	}
-
-	brokerAddress := brokerURL[0]
-	t.Logf("kafka broker address initialised at: %s", brokerAddress)
-
-	const topic = "finance"
-
-	if err := createTopicWithAdminClient(ctx, brokerAddress, topic); err != nil {
-		t.Fatalf("failed to create topic %s: %v", topic, err)
+		t.Fatalf("failed to get broker address %v", err)
 	}
 
 	const producerId = "kafka-producer"
-	producer, err := in_kafka.NewConfluentProducer([]string{brokerAddress}, producerId)
+	producer, err := in_kafka.NewConfluentProducer([]string{brokerUrl[0]}, producerId)
 	if err != nil {
 		t.Fatalf("failed to initialise producer %s: %v", producerId, err)
 	}
@@ -88,16 +114,7 @@ func Test_SendMessageToKafka(t *testing.T) {
 	t.Cleanup(producer.Shutdown)
 
 	producer.Run()
-
-	article := domain.Article{
-		Domain:    domain.FinanceDomain.String(),
-		Url:       "https://foo.bar",
-		Author:    "Foo Bar",
-		Published: "2025-12-05",
-		Provider:  "Acme Inc.",
-		Content:   "This is a finance article",
-	}
-
+	article := createMockArticle()
 	if err := producer.SendMessageToQueue(article); err != nil {
 		t.Fatalf("failed to send message to queue %v", err)
 	}
@@ -110,6 +127,60 @@ func Test_SendMessageToKafka(t *testing.T) {
 			t.Errorf("expected successfull delivery, got error: %v", km.TopicPartition.Error)
 		} else {
 			t.Log("delivery successful")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out while waiting for acknowledgments")
+	}
+}
+
+func Test_SendMessageToNonExistentTopic(t *testing.T) {
+	ctx := context.Background()
+
+	// the topic is attached to an article, I expect the process to fail if the target topic do not exist in Kafka
+	kafkaContainer, err := setupKafkaContainer(ctx, "another_topic")
+	if err != nil {
+		if kafkaContainer != nil { // at this stage the container can be initialised and error only on topic creation
+			if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
+				t.Errorf("failed to terminate container: %v", err) // just logging error, fatal comes afterwards
+			}
+		}
+		t.Fatalf("failed to start container: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
+			t.Errorf("failed to terminate container: %v", err)
+		}
+	})
+
+	brokerUrl, err := kafkaContainer.Brokers(ctx)
+	if err != nil {
+		t.Fatalf("failed to get broker address %v", err)
+	}
+
+	const producerId = "kafka-producer"
+	producer, err := in_kafka.NewConfluentProducer([]string{brokerUrl[0]}, producerId)
+	if err != nil {
+		t.Fatalf("failed to initialise producer %s: %v", producerId, err)
+	}
+	acksChannel := make(chan kafka.Event)
+	producer.SetAcksChannelForTesting(acksChannel)
+	t.Cleanup(producer.Shutdown)
+
+	producer.Run()
+	article := createMockArticle()
+	if err := producer.SendMessageToQueue(article); err != nil {
+		t.Fatalf("failed to send message to queue %v", err)
+	}
+
+	// waiting for acks from queue to assess results
+	select {
+	case e := <-acksChannel:
+		km := e.(*kafka.Message)
+		if km.TopicPartition.Error != nil {
+			t.Log("error expected, msg should not be sent to non existent topics")
+		} else {
+			t.Errorf("expected an error here, message is not supposed to be deliverd")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out while waiting for acknowledgments")

@@ -54,7 +54,7 @@ func (p *ConfluentProducer) Run() {
 					if err := json.NewDecoder(bytes.NewReader(ev.Value)).Decode(&article); err != nil {
 						fmt.Printf("error decoding article sent to kafka: %v\n", err)
 					}
-					fmt.Printf("[OK] produced event to topic %s: key = %-10s value = %s\n",
+					fmt.Printf("[OK] produced event to topic %s: key = %-10s url = %s\n",
 						*ev.TopicPartition.Topic, string(ev.Key), article.Url)
 				}
 			}
