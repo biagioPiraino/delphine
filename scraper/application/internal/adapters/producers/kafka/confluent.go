@@ -19,9 +19,12 @@ type ConfluentProducer struct {
 func NewConfluentProducer(servers []string, id string) (*ConfluentProducer, error) {
 	bootstraps := strings.Join(servers, ",")
 	p, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": bootstraps,
-		"client.id":         id,
-		"acks":              "all",
+		"bootstrap.servers":   bootstraps,
+		"delivery.timeout.ms": 3000, // report success or failure timeout
+		"request.timeout.ms":  1000, // default timeout for a single request
+		"retries":             1,    // harsh, only one retry to avoid sending to non-existent topics
+		"client.id":           id,
+		"acks":                "all",
 	})
 	if err != nil {
 		return nil, err
