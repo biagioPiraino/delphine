@@ -49,6 +49,9 @@ func Test_SendMessageToKafka(t *testing.T) {
 	kafkaContainer, err := tc_kafka.Run(ctx,
 		"confluentinc/cp-kafka:7.4.0",
 		tc_kafka.WithClusterID("test-cluster"),
+		testcontainers.WithEnv(map[string]string{
+			"KAFKA_AUTO_CREATE_TOPICS_ENABLE": "false",
+		}),
 	)
 
 	if err != nil {
@@ -80,6 +83,8 @@ func Test_SendMessageToKafka(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to initialise producer %s: %v", producerId, err)
 	}
+	acksChannel := make(chan kafka.Event)
+	producer.SetAcksChannelForTesting(acksChannel)
 	t.Cleanup(producer.Shutdown)
 
 	producer.Run()
@@ -93,11 +98,20 @@ func Test_SendMessageToKafka(t *testing.T) {
 		Content:   "This is a finance article",
 	}
 
-	// if no error here, we assume that msg has been delivered without
-	// checking for acks since they are processed async.
-	// I wanted to avoid changing businness logic of the run method only for testing
-	// purposes because this would require probably a channel to ingest the acks.
 	if err := producer.SendMessageToQueue(article); err != nil {
 		t.Fatalf("failed to send message to queue %v", err)
+	}
+
+	// waiting for acks from queue to assess results
+	select {
+	case e := <-acksChannel:
+		km := e.(*kafka.Message)
+		if km.TopicPartition.Error != nil {
+			t.Errorf("expected successfull delivery, got error: %v", km.TopicPartition.Error)
+		} else {
+			t.Log("delivery successful")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out while waiting for acknowledgments")
 	}
 }

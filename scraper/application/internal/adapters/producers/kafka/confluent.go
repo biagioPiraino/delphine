@@ -14,6 +14,9 @@ import (
 
 type ConfluentProducer struct {
 	producer *kafka.Producer
+
+	// used for testing only
+	acksChan chan kafka.Event
 }
 
 func NewConfluentProducer(servers []string, id string) (*ConfluentProducer, error) {
@@ -37,6 +40,11 @@ func NewConfluentProducer(servers []string, id string) (*ConfluentProducer, erro
 func (p *ConfluentProducer) Run() {
 	go func() {
 		for e := range p.producer.Events() {
+			// only used for integration testing
+			if p.acksChan != nil {
+				p.acksChan <- e
+			}
+
 			switch ev := e.(type) {
 			case *kafka.Message:
 				if ev.TopicPartition.Error != nil {
@@ -77,5 +85,13 @@ func (p *ConfluentProducer) SendMessageToQueue(article domain.Article) error {
 func (p *ConfluentProducer) Shutdown() {
 	p.producer.Flush(15 * 1000) // flushes out all the messages
 	p.producer.Close()
+	// closing acks channel after testing client
+	if p.acksChan != nil {
+		close(p.acksChan)
+	}
 	fmt.Println("[OK] producer closed correctly.")
+}
+
+func (p *ConfluentProducer) SetAcksChannelForTesting(channel chan kafka.Event) {
+	p.acksChan = channel
 }
